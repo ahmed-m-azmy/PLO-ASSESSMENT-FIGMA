@@ -81,6 +81,7 @@ interface IndirectSurveyDetail {
 
 export function LearningOutcomesApp() {
   const DEPARTMENT_SESSION_KEY = "department_auth_session";
+  const INDIRECT_SURVEY_DETAILS_KEY = "indirect_survey_details_cache";
 
   const [departments, setDepartments] = React.useState<Department[]>([
     { id: "2c326074-9095-4f66-8998-bb06d8fd66c4", name: "Department of Architecture" },
@@ -347,6 +348,54 @@ const filteredPrograms = programs.filter(
   const [isManageCLOTargetsOpen, setIsManageCLOTargetsOpen] = React.useState(false);
   const [isManagePLOTargetsOpen, setIsManagePLOTargetsOpen] = React.useState(false);
   const [indirectSurveyDetails, setIndirectSurveyDetails] = React.useState<IndirectSurveyDetail[]>([]);
+
+  React.useEffect(() => {
+    try {
+      const detailsRaw = window.localStorage.getItem(INDIRECT_SURVEY_DETAILS_KEY);
+      if (!detailsRaw) return;
+
+      const parsed = JSON.parse(detailsRaw);
+      if (!Array.isArray(parsed)) return;
+
+      const hydrated = parsed.filter((item: any) =>
+        item &&
+        typeof item.id === "string" &&
+        typeof item.ploId === "string" &&
+        typeof item.programId === "string" &&
+        typeof item.academicYear === "string" &&
+        Number.isFinite(Number(item.faculty)) &&
+        Number.isFinite(Number(item.alumni)) &&
+        Number.isFinite(Number(item.employers)) &&
+        Number.isFinite(Number(item.exitInterviews)) &&
+        Number.isFinite(Number(item.indirectTotal))
+      ).map((item: any) => ({
+        id: String(item.id),
+        ploId: String(item.ploId),
+        programId: String(item.programId),
+        academicYear: String(item.academicYear),
+        faculty: Number(item.faculty),
+        alumni: Number(item.alumni),
+        employers: Number(item.employers),
+        exitInterviews: Number(item.exitInterviews),
+        indirectTotal: Number(item.indirectTotal),
+      }));
+
+      setIndirectSurveyDetails(hydrated);
+    } catch {
+      window.localStorage.removeItem(INDIRECT_SURVEY_DETAILS_KEY);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        INDIRECT_SURVEY_DETAILS_KEY,
+        JSON.stringify(indirectSurveyDetails)
+      );
+    } catch {
+      // Ignore storage errors in restricted/private browser contexts.
+    }
+  }, [indirectSurveyDetails]);
 
   const [academicYears, setAcademicYears] = React.useState<string[]>([
     "2022-2023",
@@ -2736,19 +2785,14 @@ const plosMap = Object.fromEntries(
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart
                       data={(() => {
-                        const directAssessments = assessments.filter(
-                          (a) => a.type === "direct" && a.programId === selectedProgram && a.academicYear === analyticsSelectedYear
-                        );
-                        const indirectAssessments = assessments.filter(
-                          (a) => a.type === "indirect" && a.programId === selectedProgram && a.academicYear === analyticsSelectedYear
-                        );
+                        const ploComparisonData = getPLOHeatmapData();
 
-                        const directAvg = directAssessments.length > 0
-                          ? directAssessments.reduce((sum, a) => sum + a.value, 0) / directAssessments.length
+                        const directAvg = ploComparisonData.length > 0
+                          ? ploComparisonData.reduce((sum, row) => sum + row.direct, 0) / ploComparisonData.length
                           : 0;
 
-                        const indirectAvg = indirectAssessments.length > 0
-                          ? indirectAssessments.reduce((sum, a) => sum + a.value, 0) / indirectAssessments.length
+                        const indirectAvg = ploComparisonData.length > 0
+                          ? ploComparisonData.reduce((sum, row) => sum + row.indirect, 0) / ploComparisonData.length
                           : 0;
 
                         const total = (directAvg * 0.6) + (indirectAvg * 0.4);
