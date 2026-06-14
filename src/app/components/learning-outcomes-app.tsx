@@ -81,7 +81,6 @@ interface IndirectSurveyDetail {
 
 export function LearningOutcomesApp() {
   const DEPARTMENT_SESSION_KEY = "department_auth_session";
-  const INDIRECT_SURVEY_DETAILS_KEY = "indirect_survey_details_cache";
 
   const [departments, setDepartments] = React.useState<Department[]>([
     { id: "2c326074-9095-4f66-8998-bb06d8fd66c4", name: "Department of Architecture" },
@@ -325,9 +324,17 @@ const filteredPrograms = programs.filter(
 
   // Update selected program when programs change
   React.useEffect(() => {
-    const firstProgram = filteredPrograms[0];
-    if (firstProgram && !filteredPrograms.find((p) => p.id === selectedProgram)) {
-      setSelectedProgram(firstProgram.id);
+    if (filteredPrograms.length === 0) {
+      setSelectedProgram("");
+      setCourses([]);
+      setCLOs([]);
+      setPLOs([]);
+      setAssessments([]);
+      setIndirectSurveyDetails([]);
+      return;
+    }
+    if (!filteredPrograms.find((p) => p.id === selectedProgram)) {
+      setSelectedProgram(filteredPrograms[0].id);
     }
   }, [filteredPrograms, selectedProgram]);
   const [isAddProgramOpen, setIsAddProgramOpen] = React.useState(false);
@@ -348,54 +355,6 @@ const filteredPrograms = programs.filter(
   const [isManageCLOTargetsOpen, setIsManageCLOTargetsOpen] = React.useState(false);
   const [isManagePLOTargetsOpen, setIsManagePLOTargetsOpen] = React.useState(false);
   const [indirectSurveyDetails, setIndirectSurveyDetails] = React.useState<IndirectSurveyDetail[]>([]);
-
-  React.useEffect(() => {
-    try {
-      const detailsRaw = window.localStorage.getItem(INDIRECT_SURVEY_DETAILS_KEY);
-      if (!detailsRaw) return;
-
-      const parsed = JSON.parse(detailsRaw);
-      if (!Array.isArray(parsed)) return;
-
-      const hydrated = parsed.filter((item: any) =>
-        item &&
-        typeof item.id === "string" &&
-        typeof item.ploId === "string" &&
-        typeof item.programId === "string" &&
-        typeof item.academicYear === "string" &&
-        Number.isFinite(Number(item.faculty)) &&
-        Number.isFinite(Number(item.alumni)) &&
-        Number.isFinite(Number(item.employers)) &&
-        Number.isFinite(Number(item.exitInterviews)) &&
-        Number.isFinite(Number(item.indirectTotal))
-      ).map((item: any) => ({
-        id: String(item.id),
-        ploId: String(item.ploId),
-        programId: String(item.programId),
-        academicYear: String(item.academicYear),
-        faculty: Number(item.faculty),
-        alumni: Number(item.alumni),
-        employers: Number(item.employers),
-        exitInterviews: Number(item.exitInterviews),
-        indirectTotal: Number(item.indirectTotal),
-      }));
-
-      setIndirectSurveyDetails(hydrated);
-    } catch {
-      window.localStorage.removeItem(INDIRECT_SURVEY_DETAILS_KEY);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        INDIRECT_SURVEY_DETAILS_KEY,
-        JSON.stringify(indirectSurveyDetails)
-      );
-    } catch {
-      // Ignore storage errors in restricted/private browser contexts.
-    }
-  }, [indirectSurveyDetails]);
 
   const [academicYears, setAcademicYears] = React.useState<string[]>([
     "2022-2023",
@@ -432,7 +391,40 @@ const filteredPrograms = programs.filter(
       return [];
     }
 
-    return (data?.map((a: any) => ({
+    if (!data) return [];
+
+    // Rebuild indirectSurveyDetails from Supabase data
+    const surveyDetails: IndirectSurveyDetail[] = data
+      .filter((a: any) =>
+        a.faculty_survey != null ||
+        a.alumni_survey != null ||
+        a.employers_survey != null ||
+        a.exit_interviews_survey != null
+      )
+      .map((a: any) => ({
+        id: String(a.id),
+        ploId: String(a.plo_id),
+        programId: String(a.program_id),
+        academicYear: String(a.academic_year),
+        faculty: Number(a.faculty_survey),
+        alumni: Number(a.alumni_survey),
+        employers: Number(a.employers_survey),
+        exitInterviews: Number(a.exit_interviews_survey),
+        indirectTotal: Number(a.indirect_value),
+      }));
+
+    if (surveyDetails.length > 0) {
+      setIndirectSurveyDetails((prev) => {
+        const byKey = new Map<string, IndirectSurveyDetail>();
+        [...prev, ...surveyDetails].forEach((item) => {
+          const key = `${item.programId}|${item.academicYear}|${item.ploId}`;
+          byKey.set(key, item);
+        });
+        return Array.from(byKey.values());
+      });
+    }
+
+    return data.map((a: any) => ({
       id: `indirect-${a.id}`,
       type: "indirect" as const,
       name: `${a.plo_id} - Indirect`,
@@ -442,7 +434,7 @@ const filteredPrograms = programs.filter(
       programId: String(a.program_id),
       outcomeType: "PLO" as const,
       outcomeId: String(a.plo_id),
-    })) || []);
+    }));
   };
 
   const mergeAssessments = (baseItems: Assessment[], extraItems: Assessment[]) => {
@@ -594,7 +586,10 @@ setPrograms(mapped);
   }
 };
 const fetchCourses = async () => {
-  if (!selectedProgram) return;
+  if (!selectedProgram) {
+    setCourses([]);
+    return;
+  }
 
   const { data, error } = await supabase
     .from("courses")
@@ -668,7 +663,10 @@ const fetchCLOs = async () => {
   }
 };
 const fetchPLOs = async () => {
-  if (!selectedProgram) return;
+  if (!selectedProgram) {
+    setPLOs([]);
+    return;
+  }
 
   const { data, error } = await supabase
     .from("plos")
@@ -703,11 +701,15 @@ const fetchPLOs = async () => {
   }
 };
 const fetchAssessments = async () => {
-  const query = supabase.from("assessments").select("*");
+  if (!selectedProgram) {
+    setAssessments([]);
+    return;
+  }
 
-  const { data, error } = selectedProgram
-    ? await query.eq("program_id", selectedProgram)
-    : await query;
+  const { data, error } = await supabase
+    .from("assessments")
+    .select("*")
+    .eq("program_id", selectedProgram);
 
   if (error) {
     const indirectAssessments = await fetchIndirectAssessments();
@@ -1678,20 +1680,6 @@ let plo = plos.find(
 
       importedYears.add(year);
 
-      if (surveyValues.hasAllSurveys) {
-        importedSurveyDetails.push({
-          id: `survey-${plo.id}-${year}-${Math.random().toString(36).slice(2, 8)}`,
-          ploId: String(plo.id),
-          programId: String(selectedProgram),
-          academicYear: year,
-          faculty: surveyValues.faculty,
-          alumni: surveyValues.alumni,
-          employers: surveyValues.employers,
-          exitInterviews: surveyValues.exitInterviews,
-          indirectTotal: surveyValues.total,
-        });
-      }
-
       if (!isUUID(plo.id)) {
         skippedRows += 1;
         if (!firstInsertError) {
@@ -1700,12 +1688,19 @@ let plo = plos.find(
         continue;
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         plo_id: plo.id,
         program_id: programIdNumber,
         academic_year: year,
         indirect_value: indirectScore,
       };
+
+      if (surveyValues.hasAllSurveys) {
+        payload.faculty_survey = surveyValues.faculty;
+        payload.alumni_survey = surveyValues.alumni;
+        payload.employers_survey = surveyValues.employers;
+        payload.exit_interviews_survey = surveyValues.exitInterviews;
+      }
 
       const { data: createdIndirect, error: indirectError } = await supabase
         .from("indirect_plo_assessments")
@@ -1726,6 +1721,21 @@ let plo = plos.find(
           outcomeId: String(createdIndirect.plo_id),
         };
         importedAssessments.push(assessmentItem);
+
+        if (surveyValues.hasAllSurveys) {
+          importedSurveyDetails.push({
+            id: String(createdIndirect.id),
+            ploId: String(createdIndirect.plo_id),
+            programId: String(createdIndirect.program_id),
+            academicYear: createdIndirect.academic_year,
+            faculty: surveyValues.faculty,
+            alumni: surveyValues.alumni,
+            employers: surveyValues.employers,
+            exitInterviews: surveyValues.exitInterviews,
+            indirectTotal: Number(createdIndirect.indirect_value),
+          });
+        }
+
         syncedRows += 1;
       } else {
         if (!firstInsertError) {
