@@ -72,10 +72,10 @@ interface IndirectSurveyDetail {
   ploId: string;
   programId: string;
   academicYear: string;
-  faculty: number;
-  alumni: number;
-  employers: number;
-  exitInterviews: number;
+  faculty: number | null;
+  alumni: number | null;
+  employers: number | null;
+  exitInterviews: number | null;
   indirectTotal: number;
 }
 
@@ -393,48 +393,57 @@ const filteredPrograms = programs.filter(
 
     if (!data) return [];
 
-    // Rebuild indirectSurveyDetails from Supabase data
-    const surveyDetails: IndirectSurveyDetail[] = data
-      .filter((a: any) =>
-        a.faculty_survey != null ||
-        a.alumni_survey != null ||
-        a.employers_survey != null ||
-        a.exit_interviews_survey != null
-      )
-      .map((a: any) => ({
-        id: String(a.id),
-        ploId: String(a.plo_id),
-        programId: String(a.program_id),
-        academicYear: String(a.academic_year),
-        faculty: Number(a.faculty_survey),
-        alumni: Number(a.alumni_survey),
-        employers: Number(a.employers_survey),
-        exitInterviews: Number(a.exit_interviews_survey),
-        indirectTotal: Number(a.indirect_value),
-      }));
+    console.log("📥 Fetched indirect data from Supabase:", data);
+
+    // Rebuild indirectSurveyDetails from Supabase data - include all rows that have indirect_value
+    const surveyDetails: IndirectSurveyDetail[] = data.map((a: any) => ({
+      id: String(a.id),
+      ploId: String(a.plo_id),
+      programId: String(a.program_id),
+      academicYear: String(a.academic_year),
+      faculty: a.faculty_survey != null ? Number(a.faculty_survey) : null,
+      alumni: a.alumni_survey != null ? Number(a.alumni_survey) : null,
+      employers: a.employers_survey != null ? Number(a.employers_survey) : null,
+      exitInterviews: a.exit_interviews_survey != null ? Number(a.exit_interviews_survey) : null,
+      indirectTotal: Number(a.indirect_value),
+    }));
+
+    console.log("📊 Converted to surveyDetails:", surveyDetails);
 
     if (surveyDetails.length > 0) {
       setIndirectSurveyDetails((prev) => {
         const byKey = new Map<string, IndirectSurveyDetail>();
-        [...prev, ...surveyDetails].forEach((item) => {
+        // Start fresh with DB data for this program, keep other programs' data from prev
+        prev.forEach((item) => {
+          if (item.programId !== String(selectedProgram)) {
+            const key = `${item.programId}|${item.academicYear}|${item.ploId}`;
+            byKey.set(key, item);
+          }
+        });
+        surveyDetails.forEach((item) => {
           const key = `${item.programId}|${item.academicYear}|${item.ploId}`;
           byKey.set(key, item);
         });
-        return Array.from(byKey.values());
+        const result = Array.from(byKey.values());
+        console.log("✅ Updated indirectSurveyDetails:", result);
+        return result;
       });
     }
 
-    return data.map((a: any) => ({
-      id: `indirect-${a.id}`,
-      type: "indirect" as const,
-      name: `${a.plo_id} - Indirect`,
-      weight: 40,
-      value: Number(a.indirect_value),
-      academicYear: a.academic_year,
-      programId: String(a.program_id),
-      outcomeType: "PLO" as const,
-      outcomeId: String(a.plo_id),
-    }));
+    return data.map((a: any) => {
+      const matchedPlo = plos.find((p) => String(p.id) === String(a.plo_id));
+      return {
+        id: `indirect-${a.id}`,
+        type: "indirect" as const,
+        name: `${matchedPlo?.code ?? a.plo_id} - Indirect`,
+        weight: 40,
+        value: Number(a.indirect_value),
+        academicYear: a.academic_year,
+        programId: String(a.program_id),
+        outcomeType: "PLO" as const,
+        outcomeId: String(a.plo_id),
+      };
+    });
   };
 
   const mergeAssessments = (baseItems: Assessment[], extraItems: Assessment[]) => {
@@ -752,7 +761,7 @@ React.useEffect(() => {
 }, [selectedProgram, selectedYear]);
 React.useEffect(() => {
   fetchAssessments();
-}, [selectedProgram]);
+}, [selectedProgram, selectedYear]);
 
 
 const addProgram = async (name: string, departmentId: string) => {
@@ -1534,24 +1543,40 @@ let plo = plos.find(
     const parseNumber = (value: any) => {
       const cleaned = normalize(value).replace(/%/g, "").replace(/,/g, ".");
       const parsed = Number(cleaned);
-      return Number.isFinite(parsed) ? parsed : NaN;
+      const result = Number.isFinite(parsed) ? parsed : NaN;
+      if (!Number.isFinite(result) && value !== "") {
+        console.log(`⚠️ parseNumber failed for "${value}"`);
+      }
+      return result;
     };
     const getSurveyValues = (row: any) => {
+      // Try exact match first, then normalized match
       const faculty = parseNumber(
-        getField(row, ["Faculty Survey", "Faculty", "faculty_survey", "faculty survey"])
+        getField(row, ["Faculty Survey", "B", "faculty_survey", "faculty survey", "Faculty (%)", "Faculty Survey (%)"])
       );
       const alumni = parseNumber(
-        getField(row, ["Alumni Survey", "Alumni", "alumni_survey", "alumni survey"])
+        getField(row, ["Alumni Survey", "C", "alumni_survey", "alumni survey", "Alumni (%)", "Alumni Survey (%)"])
       );
       const employers = parseNumber(
-        getField(row, ["Employers Survey", "Employer Survey", "employers_survey", "employers survey"])
+        getField(row, ["Employers Survey", "D", "Employer Survey", "employers_survey", "employers survey", "Employers (%)", "Employers Survey (%)"])
       );
       const exitInterviews = parseNumber(
-        getField(row, ["Exit interviews Survey", "Exit Interview Survey", "exit_interviews_survey", "exit interviews survey"])
+        getField(row, ["Exit interviews Survey", "E", "Exit Interview Survey", "exit_interviews_survey", "exit interviews survey", "Exit Interviews (%)", "Exit Interviews Survey (%)"])
       );
 
       const values = [faculty, alumni, employers, exitInterviews];
       const hasAllValues = values.every((value) => Number.isFinite(value));
+
+      console.log("🔍 Row values:", { 
+        faculty, 
+        alumni, 
+        employers, 
+        exitInterviews, 
+        hasAllValues,
+      });
+
+      // If we don't have all surveys but have at least one, still save them
+      const hasAnySurvey = values.some((value) => Number.isFinite(value));
 
       if (hasAllValues) {
         const sum = values.reduce((total, value) => total + value, 0);
@@ -1567,8 +1592,20 @@ let plo = plos.find(
 
       // Backward compatibility with old template that had a single Indirect column.
       const fallbackTotal = parseNumber(
-        getField(row, ["Indirect", "Indirect total", "Indirect (%)", "indirect", "Score", "Value", "Result", "indirect_score"])
+        getField(row, ["Indirect", "Indirect total", "Indirect (%)", "indirect", "Score", "Value", "Result", "indirect_score", "F"])
       );
+
+      // Return partial surveys if we found at least some
+      if (hasAnySurvey) {
+        return {
+          faculty: Number.isFinite(faculty) ? faculty : NaN,
+          alumni: Number.isFinite(alumni) ? alumni : NaN,
+          employers: Number.isFinite(employers) ? employers : NaN,
+          exitInterviews: Number.isFinite(exitInterviews) ? exitInterviews : NaN,
+          total: Number.isFinite(fallbackTotal) ? fallbackTotal : 0,
+          hasAllSurveys: false,
+        };
+      }
 
       return {
         faculty: NaN,
@@ -1589,12 +1626,27 @@ let plo = plos.find(
     };
     const getField = (row: any, aliases: string[]) => {
       const keys = Object.keys(row || {});
+      
       for (const alias of aliases) {
         const aliasNormalized = normalizeKey(alias);
+        
+        // Try exact key match first
+        if (row.hasOwnProperty(alias)) {
+          const value = normalize(row[alias]);
+          if (value) {
+            return value;
+          }
+        }
+        
+        // Try normalized match
         const matchedKey = keys.find((key) => normalizeKey(key) === aliasNormalized);
         if (matchedKey) {
-          const value = normalize(row[matchedKey]);
-          if (value) return value;
+          const rawValue = row[matchedKey];
+          const value = normalize(rawValue);
+          if (value) {
+            console.log(`✅ Found "${alias}" via key "${matchedKey}" = ${rawValue}`);
+            return value;
+          }
         }
       }
       return "";
@@ -1625,6 +1677,10 @@ let plo = plos.find(
     let firstInsertError: string | null = null;
 
     for (const row of data) {
+      if (data.indexOf(row) === 0 || data.indexOf(row) === 1) {
+        console.log("📋 Row keys for index " + data.indexOf(row) + ":", Object.keys(row || {}));
+        console.log("📋 Full row data:", row);
+      }
       const ploCode = normalizePLOCode(
         getField(row, ["PLO", "PLO Code", "PLO_Code", "PLO ID", "plo", "code", "Code"])
       );
@@ -1695,11 +1751,23 @@ let plo = plos.find(
         indirect_value: indirectScore,
       };
 
+      console.log("📊 surveyValues.hasAllSurveys:", surveyValues.hasAllSurveys);
+      console.log("📊 survey values:", { faculty: surveyValues.faculty, alumni: surveyValues.alumni, employers: surveyValues.employers, exitInterviews: surveyValues.exitInterviews });
+
+      // Always try to save individual surveys if hasAllSurveys is true
       if (surveyValues.hasAllSurveys) {
         payload.faculty_survey = surveyValues.faculty;
         payload.alumni_survey = surveyValues.alumni;
         payload.employers_survey = surveyValues.employers;
         payload.exit_interviews_survey = surveyValues.exitInterviews;
+        console.log("✅ SAVING with all surveys:", payload);
+      } else {
+        // Try to save individual surveys even if not all are found
+        if (Number.isFinite(surveyValues.faculty)) payload.faculty_survey = surveyValues.faculty;
+        if (Number.isFinite(surveyValues.alumni)) payload.alumni_survey = surveyValues.alumni;
+        if (Number.isFinite(surveyValues.employers)) payload.employers_survey = surveyValues.employers;
+        if (Number.isFinite(surveyValues.exitInterviews)) payload.exit_interviews_survey = surveyValues.exitInterviews;
+        console.log("⚠️ SAVING partial surveys:", payload);
       }
 
       const { data: createdIndirect, error: indirectError } = await supabase
@@ -1708,7 +1776,18 @@ let plo = plos.find(
         .select()
         .single();
 
-      if (!indirectError && createdIndirect) {
+      if (indirectError) {
+        console.error(`❌ Failed to insert for PLO ${plo.code}:`, { 
+          error: indirectError, 
+          errorMessage: indirectError?.message,
+          errorCode: indirectError?.code,
+          payload 
+        });
+        skippedRows += 1;
+        if (!firstInsertError) {
+          firstInsertError = indirectError?.message || "Failed to insert indirect assessment";
+        }
+      } else if (createdIndirect) {
         const assessmentItem: Assessment = {
           id: `indirect-${createdIndirect.id}`,
           type: "indirect",
@@ -1722,30 +1801,28 @@ let plo = plos.find(
         };
         importedAssessments.push(assessmentItem);
 
-        if (surveyValues.hasAllSurveys) {
+        // Save survey details if they were included in the payload
+        const hasSurveyData = 
+          Number.isFinite(createdIndirect.faculty_survey) ||
+          Number.isFinite(createdIndirect.alumni_survey) ||
+          Number.isFinite(createdIndirect.employers_survey) ||
+          Number.isFinite(createdIndirect.exit_interviews_survey);
+
+        if (hasSurveyData) {
           importedSurveyDetails.push({
             id: String(createdIndirect.id),
             ploId: String(createdIndirect.plo_id),
             programId: String(createdIndirect.program_id),
             academicYear: createdIndirect.academic_year,
-            faculty: surveyValues.faculty,
-            alumni: surveyValues.alumni,
-            employers: surveyValues.employers,
-            exitInterviews: surveyValues.exitInterviews,
+            faculty: Number.isFinite(createdIndirect.faculty_survey) ? Number(createdIndirect.faculty_survey) : null,
+            alumni: Number.isFinite(createdIndirect.alumni_survey) ? Number(createdIndirect.alumni_survey) : null,
+            employers: Number.isFinite(createdIndirect.employers_survey) ? Number(createdIndirect.employers_survey) : null,
+            exitInterviews: Number.isFinite(createdIndirect.exit_interviews_survey) ? Number(createdIndirect.exit_interviews_survey) : null,
             indirectTotal: Number(createdIndirect.indirect_value),
           });
         }
 
         syncedRows += 1;
-      } else {
-        if (!firstInsertError) {
-          firstInsertError = indirectError?.message || "Unknown insert error";
-        }
-        console.error("Failed to insert indirect PLO assessment", {
-          payload,
-          error: indirectError,
-        });
-        skippedRows += 1;
       }
 
     }
@@ -1944,6 +2021,10 @@ let plo = plos.find(
   };
 
   const getSelectedYearIndirectDetailsData = () => {
+    console.log("📋 Getting indirect details for year:", selectedYear, "Program:", selectedProgram);
+    console.log("📦 indirectSurveyDetails:", indirectSurveyDetails);
+    console.log("🎯 visiblePLOs:", visiblePLOs);
+    
     return visiblePLOs.map((plo) => {
       const detail = indirectSurveyDetails.find(
         (item) =>
@@ -1951,6 +2032,12 @@ let plo = plos.find(
           item.academicYear === selectedYear &&
           item.ploId === plo.id
       );
+
+      if (!detail) {
+        console.log(`⚠️ No detail found for PLO ${plo.code} (id: ${plo.id})`);
+      } else {
+        console.log(`✅ Found detail for PLO ${plo.code}:`, detail);
+      }
 
       const fallbackIndirectAssessments = assessments.filter(
         (a) =>
@@ -2097,6 +2184,7 @@ const plosMap = Object.fromEntries(
               <ReportExport
                 departments={departments}
                 programs={programs}
+                courses={courses}
                 clos={clos}
                 plos={plos}
                 assessments={assessments}
@@ -3674,6 +3762,12 @@ function ImportIndirectPLODialog({ isOpen, setIsOpen, onImport, isDisabled }: an
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        console.log("📂 Indirect PLO - Imported file - Total rows:", jsonData.length);
+        if (jsonData.length > 0) {
+          console.log("📂 Indirect PLO - First row keys:", Object.keys(jsonData[0] as any));
+          console.log("📂 Indirect PLO - First row data:", jsonData[0]);
+        }
 
         onImport(jsonData);
         setIsOpen(false);
