@@ -52,6 +52,8 @@ type PloResultRow = {
 
 const CHART_WIDTH = 920;
 const CHART_HEIGHT = 420;
+const REPORT_BACKGROUND_RGB = [255, 253, 245] as const;
+const REPORT_BACKGROUND_HEX = "fffdf5";
 
 const escapeXml = (value: string) =>
   value
@@ -584,23 +586,26 @@ export function ReportExport({
       const { dataUrl: universityLogoDataUrl } = await loadImageData(universityLogoUrl);
       const pdf = new jsPDF("p", "mm", "a4") as any;
       const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
       let yPosition = 20;
 
-      pdf.addImage(universityLogoDataUrl, "PNG", 15, 5, 45, 45 * (721 / 1878));
+      pdf.setFillColor(...REPORT_BACKGROUND_RGB);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      pdf.addImage(universityLogoDataUrl, "PNG", 15, 4, 36, 36 * (721 / 1878));
 
       // Header with gradient effect
       pdf.setFillColor(37, 99, 235);
-      pdf.rect(0, 82, pageWidth, 45, "F");
+      pdf.rect(0, 21, pageWidth, 45, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFontSize(24);
       pdf.setFont("helvetica", "bold");
-      pdf.text("Learning Outcomes Assessment Report", pageWidth / 2, 100, { align: "center" });
+      pdf.text("Learning Outcomes Assessment Report", pageWidth / 2, 39, { align: "center" });
       pdf.setFontSize(14);
-      pdf.text("College of Architecture and Planning", pageWidth / 2, 110, { align: "center" });
+      pdf.text("College of Architecture and Planning", pageWidth / 2, 49, { align: "center" });
       pdf.setFontSize(10);
-      pdf.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, pageWidth / 2, 118, { align: "center" });
+      pdf.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, pageWidth / 2, 57, { align: "center" });
 
-      yPosition = 137;
+      yPosition = 76;
       pdf.setTextColor(0, 0, 0);
 
       // Program Information Box
@@ -628,6 +633,19 @@ export function ReportExport({
 
       yPosition += 35;
 
+      const addTableAnalysis = (text: string, currentY: number) => {
+        pdf.setFontSize(8.5);
+        pdf.setFont("helvetica", "italic");
+        pdf.setTextColor(75, 85, 99);
+        const lines = pdf.splitTextToSize(text, pageWidth - 20);
+        if (currentY + lines.length * 4.2 > pageHeight - 15) {
+          pdf.addPage();
+          currentY = 20;
+        }
+        pdf.text(lines, 10, currentY);
+        return currentY + lines.length * 4.2 + 8;
+      };
+
       // CLOs Section Header
       pdf.setFontSize(16);
       pdf.setFont("helvetica", "bold");
@@ -636,6 +654,14 @@ export function ReportExport({
       yPosition += 8;
 
       // CLOs Table
+      const totalClos = clos.length;
+      const achievedClosCount = clos.filter((c) => (c.achievement ?? 0) >= c.targetValue).length;
+      const belowTargetClos = clos.filter((c) => (c.achievement ?? 0) < c.targetValue);
+      const avgCloScore = totalClos > 0 ? clos.reduce((s, c) => s + (c.achievement ?? 0), 0) / totalClos : 0;
+      const avgCloTarget = totalClos > 0 ? clos.reduce((s, c) => s + c.targetValue, 0) / totalClos : 0;
+      const distinctCoursesCount = new Set(clos.map((c) => c.courseId)).size;
+      const cloTableAnalysis = `Analysis of CLOs: A total of ${totalClos} Course Learning Outcomes (CLOs) across ${distinctCoursesCount} courses were evaluated. Overall, ${achievedClosCount} of ${totalClos} CLOs (${((achievedClosCount / (totalClos || 1)) * 100).toFixed(1)}%) achieved their benchmark targets, with an aggregate average score of ${avgCloScore.toFixed(1)}% against an average target of ${avgCloTarget.toFixed(1)}%. ${belowTargetClos.length > 0 ? `Outcomes requiring instructional focus include: ${belowTargetClos.map((c) => c.code).join(", ")}.` : "All assessed CLOs successfully met or exceeded performance criteria across contributing courses."}`;
+
       const cloData = clos.map((clo) => {
         const score = clo.achievement ?? 0;
         const status = score >= clo.targetValue ? "Achieved" : "Not Achieved";
@@ -661,9 +687,18 @@ export function ReportExport({
         },
       });
 
-      yPosition = (pdf as any).lastAutoTable.finalY + 15;
+      yPosition = addTableAnalysis(cloTableAnalysis, (pdf as any).lastAutoTable.finalY + 5);
 
       // PLOs Table
+      const ploScores = plos.map((plo) => ({
+        plo,
+        score: calculateWeightedScore(plo.id, "PLO"),
+      }));
+      const achievedPloCount = ploScores.filter((item) => item.score >= item.plo.targetValue).length;
+      const avgPloScore = ploScores.length > 0 ? ploScores.reduce((sum, item) => sum + item.score, 0) / ploScores.length : 0;
+      const avgPloTarget = plos.length > 0 ? plos.reduce((sum, item) => sum + item.targetValue, 0) / plos.length : 0;
+      const ploTableAnalysis = `Analysis of PILOs: Overall PILO attainment rate is ${((achievedPloCount / (plos.length || 1)) * 100).toFixed(1)}% (${achievedPloCount} of ${plos.length} outcomes achieved). The aggregate average score reached ${avgPloScore.toFixed(1)}% against a target benchmark of ${avgPloTarget.toFixed(1)}%, integrating direct weighted course evidence and indirect stakeholder surveys.`;
+
       const ploData = plos.map((plo) => {
         const score = calculateWeightedScore(plo.id, "PLO");
         const status = score >= plo.targetValue ? "Achieved" : "Not Achieved";
@@ -686,7 +721,7 @@ export function ReportExport({
         margin: { left: 10, right: 10 },
       });
 
-      yPosition = (pdf as any).lastAutoTable.finalY + 15;
+      yPosition = addTableAnalysis(ploTableAnalysis, (pdf as any).lastAutoTable.finalY + 5);
 
       const detailedIndirectRows = plos.map((plo) => {
         const detail = indirectSurveyDetails.find(
@@ -719,6 +754,8 @@ export function ReportExport({
         ];
       });
 
+      const indirectSurveyTableAnalysis = `Analysis of Indirect Surveys: Stakeholder perception indicators provide valuable feedback from faculty, alumni, employers, and exit interviews. The survey register captures multi-stakeholder evaluations to corroborate direct coursework assessments and guide academic continuous improvement.`;
+
       pdf.setFontSize(16);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(37, 99, 235);
@@ -735,10 +772,14 @@ export function ReportExport({
         margin: { left: 10, right: 10 },
       });
 
-      yPosition = (pdf as any).lastAutoTable.finalY + 15;
+      yPosition = addTableAnalysis(indirectSurveyTableAnalysis, (pdf as any).lastAutoTable.finalY + 5);
 
       // Assessments Table
       const programAssessments = assessments.filter((a) => a.programId === selectedProgram && a.academicYear === selectedYear);
+      const directCount = programAssessments.filter((a) => a.type === "direct").length;
+      const indirectCount = programAssessments.filter((a) => a.type === "indirect").length;
+      const assessmentTableAnalysis = `Analysis of Assessment Register: A total of ${programAssessments.length} assessment evidence records are cataloged for this reporting period (${directCount} direct assessment instruments and ${indirectCount} indirect survey records), ensuring comprehensive evidence triangulation across all outcome categories.`;
+
       const assessmentData = programAssessments.map((assessment) => {
         const outcome = assessment.outcomeType === "CLO"
           ? clos.find((c) => c.id === assessment.outcomeId)
@@ -767,6 +808,8 @@ export function ReportExport({
         alternateRowStyles: { fillColor: [254, 242, 242] },
         margin: { left: 10, right: 10 },
       });
+
+      addTableAnalysis(assessmentTableAnalysis, (pdf as any).lastAutoTable.finalY + 5);
 
       pdf.save(`Learning_Outcomes_Report_${selectedYear}.pdf`);
     } catch (error) {
@@ -976,6 +1019,37 @@ export function ReportExport({
       const introText = `The purpose of this report is to evaluate the extent to which the ${selectedProgramData?.name || "selected"} program has achieved its Program Intended Learning Outcomes (PILOs) during the academic year ${selectedYear}. The analysis draws upon direct and indirect evidence, integrates weighted course-level performance, and supports evidence-based enhancement decisions aligned with internal quality assurance expectations.`;
 
       const findingsText = `The program achieved ${achievedCount} out of ${ploResults.length} PILOs at or above their specified benchmark. ${belowTarget.length > 0 ? `The following PILOs remained below target in the current cycle: ${belowTarget.map((item) => item.code).join(", ")}.` : "All assessed PILOs met or exceeded their target benchmark in the current cycle."}`;
+
+      // ── Descriptions and Analyses under Tables ──────────────────────────────
+      const totalClosWord = clos.length;
+      const achievedClosCountWord = clos.filter((c) => (c.achievement ?? 0) >= c.targetValue).length;
+      const belowTargetClosWord = clos.filter((c) => (c.achievement ?? 0) < c.targetValue);
+      const avgCloScoreWord = totalClosWord > 0 ? clos.reduce((s, c) => s + (c.achievement ?? 0), 0) / totalClosWord : 0;
+      const avgCloTargetWord = totalClosWord > 0 ? clos.reduce((s, c) => s + c.targetValue, 0) / totalClosWord : 0;
+      const distinctCoursesCountWord = new Set(clos.map((c) => c.courseId)).size;
+
+      const cloTableAnalysisWord = `Table Analysis (CLOs): A total of ${totalClosWord} Course Learning Outcomes (CLOs) were evaluated across ${distinctCoursesCountWord} contributing courses. Overall, ${achievedClosCountWord} of ${totalClosWord} CLOs (${((achievedClosCountWord / (totalClosWord || 1)) * 100).toFixed(1)}%) attained or exceeded their established target, achieving an aggregate average score of ${avgCloScoreWord.toFixed(1)}% against an average target benchmark of ${avgCloTargetWord.toFixed(1)}%. ${belowTargetClosWord.length > 0 ? `The specific outcomes requiring instructional reinforcement include: ${belowTargetClosWord.map((c) => c.code).join(", ")}.` : "All individual CLOs met their required performance criteria, demonstrating robust instructional delivery across all contributing courses."}`;
+
+      const ploTableAnalysisWord = `Table Analysis (PILOs): The PILO summary demonstrates that ${achievedCount} out of ${ploResults.length} outcomes (${((achievedCount / (ploResults.length || 1)) * 100).toFixed(1)}%) met or exceeded their designated target threshold. The average composite attainment across all PILOs stands at ${averageActual.toFixed(1)}% (comprising a direct assessment average of ${directAverage.toFixed(1)}% and an indirect assessment average of ${indirectAverage.toFixed(1)}%) compared to an average target benchmark of ${targetBenchmark.toFixed(1)}%. ${belowTarget.length > 0 ? `Outcomes falling below target include ${belowTarget.map((p) => p.code).join(", ")}, which have been prioritized for action in the continuous improvement plan.` : "All assessed PILOs satisfied the required quality assurance benchmarks for this cycle."}`;
+
+      const directAssessmentsCountWord = programAssessments.filter((a) => a.type === "direct").length;
+      const indirectAssessmentsCountWord = programAssessments.filter((a) => a.type === "indirect").length;
+      const minAssessmentScoreWord = programAssessments.length > 0 ? Math.min(...programAssessments.map((a) => a.value)) : 0;
+      const maxAssessmentScoreWord = programAssessments.length > 0 ? Math.max(...programAssessments.map((a) => a.value)) : 0;
+
+      const assessmentTableAnalysisWord = `Table Analysis (Assessment Register): The assessment evidence register details ${programAssessments.length} evidence records utilized in this assessment cycle (${directAssessmentsCountWord} direct course assessment instruments and ${indirectAssessmentsCountWord} indirect survey components). Scores ranged from ${minAssessmentScoreWord.toFixed(1)}% to ${maxAssessmentScoreWord.toFixed(1)}%, providing comprehensive multi-source triangulation between student course performance and stakeholder feedback.`;
+
+      const surveyWithDataWord = detailedIndirectRows.filter((r) => r.faculty !== null);
+      const avgFacultyWord = surveyWithDataWord.length > 0 ? surveyWithDataWord.reduce((s, r) => s + (r.faculty ?? 0), 0) / surveyWithDataWord.length : 0;
+      const avgAlumniWord = surveyWithDataWord.length > 0 ? surveyWithDataWord.reduce((s, r) => s + (r.alumni ?? 0), 0) / surveyWithDataWord.length : 0;
+      const avgEmployersWord = surveyWithDataWord.length > 0 ? surveyWithDataWord.reduce((s, r) => s + (r.employers ?? 0), 0) / surveyWithDataWord.length : 0;
+      const avgExitWord = surveyWithDataWord.length > 0 ? surveyWithDataWord.reduce((s, r) => s + (r.exitInterviews ?? 0), 0) / surveyWithDataWord.length : 0;
+
+      const indirectSurveyTableAnalysisWord = `Table Analysis (Detailed Indirect Surveys): Stakeholder perception scores across instruments recorded averages of: Faculty Surveys (${avgFacultyWord.toFixed(1)}%), Alumni Surveys (${avgAlumniWord.toFixed(1)}%), Employer Surveys (${avgEmployersWord.toFixed(1)}%), and Exit Interviews (${avgExitWord.toFixed(1)}%). This disaggregation highlights key areas of stakeholder alignment and provides valuable diagnostic insight into external perceptions of program quality.`;
+
+      const benchmarkingTableAnalysisWord = `Table Analysis (Benchmarking): The benchmarking analysis indicates an overall actual achievement of ${averageActual.toFixed(1)}% against a target benchmark of ${targetBenchmark.toFixed(1)}% (variance of ${(averageActual - targetBenchmark >= 0 ? "+" : "") + (averageActual - targetBenchmark).toFixed(1)} percentage points) and an internal benchmark of ${internalBenchmark.toFixed(1)}%. ${belowTarget.length > 0 ? `While ${ploResults.length - belowTarget.length} outcomes satisfied benchmark standards, ${belowTarget.length} PILO${belowTarget.length > 1 ? "s" : ""} require structured pedagogical interventions to close the identified performance gap.` : "The program has successfully met all established institutional and program-level benchmarks for this reporting cycle."}`;
+
+      const heatmapTableAnalysisWord = `Table Analysis (PLO Performance Matrix): The PLO matrix illustrates the comparative direct (60% weight) and indirect (40% weight) attainment across every program outcome. ${directAverage >= indirectAverage ? `Direct assessment evidence (${directAverage.toFixed(1)}%) is higher than stakeholder perception ratings (${indirectAverage.toFixed(1)}%), indicating strong demonstrated student competence.` : `Indirect stakeholder ratings (${indirectAverage.toFixed(1)}%) exceed direct assessments (${directAverage.toFixed(1)}%), reflecting positive external confidence in student learning outcomes.`}`;
 
       // ── Build Improvement Plans ──────────────────────────────────────────────
       const improvementPlanItems: Paragraph[] = [];
@@ -1195,10 +1269,13 @@ export function ReportExport({
         createParagraph(findingsText),
         createParagraph("Course Learning Outcomes (CLOs) Summary", { bold: true, spacingBefore: 120 }),
         createTextTable(["Course", "CLO", "PLO", "Relative Weight", "Target", "Current", "Status"], cloRows),
+        createParagraph(cloTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createParagraph("Program Intended Learning Outcomes (PILOs) Summary", { bold: true, spacingBefore: 180 }),
         createTextTable(["Code", "Description", "Direct", "Indirect", "Total", "Target", "Status"], ploRows),
+        createParagraph(ploTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createParagraph("Assessment Evidence Register", { bold: true, spacingBefore: 180 }),
         createTextTable(["Assessment", "Type", "Outcome", "Level", "Weight", "Score"], assessmentRows),
+        createParagraph(assessmentTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createParagraph("Detailed Indirect Surveys Register", { bold: true, spacingBefore: 180 }),
         createTextTable(
           ["PLO", "Faculty", "Alumni", "Employers", "Exit interviews", "Indirect total"],
@@ -1211,6 +1288,7 @@ export function ReportExport({
             `${row.total.toFixed(1)}%`,
           ])
         ),
+        createParagraph(indirectSurveyTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createHeading("4.1 Assessment Charts", HeadingLevel.HEADING_2),
         createParagraph("The following charts summarize the current distribution of assessment evidence, year-on-year performance movement, comparative PILO attainment, and the detailed indirect survey structure by PLO."),
         new Paragraph({
@@ -1272,12 +1350,7 @@ export function ReportExport({
             ["PILOs Below Target", `${belowTarget.length}`],
           ]
         ),
-        createParagraph(
-          belowTarget.length > 0
-            ? `A total of ${belowTarget.length} PILOs fell below their target benchmark and therefore require focused follow-up in the next assessment cycle.`
-            : "All PILOs met or exceeded their target benchmark, indicating strong program-level attainment for the current cycle.",
-          { spacingBefore: 120 }
-        ),
+        createParagraph(benchmarkingTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createParagraph("PLO Heatmap", { bold: true, spacingBefore: 120 }),
         createTextTable(["PLO", "Direct %", "Indirect %", "Total %", "Target %"], ploResults.map((row) => [
           row.code,
@@ -1286,6 +1359,7 @@ export function ReportExport({
           row.total.toFixed(1),
           row.target.toFixed(1),
         ])),
+        createParagraph(heatmapTableAnalysisWord, { spacingBefore: 80, spacingAfter: 160 }),
         createHeading("4.3 Conclusion", HeadingLevel.HEADING_2),
         createParagraph(`The ${selectedProgramData?.name || "program"} demonstrates a coherent and measurable assessment framework for PILOs. Performance across the assessed outcomes indicates ${achievedCount === ploResults.length ? "consistently strong attainment" : "solid attainment overall with identifiable areas for enhancement"}. The analysis also shows that ${directAverage >= indirectAverage ? "direct assessment evidence exceeds indirect evidence, suggesting stronger demonstrated performance than stakeholder perception" : "indirect evidence is comparable to or stronger than direct evidence, indicating positive stakeholder confirmation of attainment"}.`),
         createHeading("4.4 Recommendations", HeadingLevel.HEADING_2),
@@ -1299,6 +1373,7 @@ export function ReportExport({
       ];
 
       const doc = new Document({
+        background: { color: REPORT_BACKGROUND_HEX },
         sections: [
           {
             headers: {
