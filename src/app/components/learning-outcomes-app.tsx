@@ -2137,7 +2137,10 @@ const plosMap = Object.fromEntries(
         >
           <div className="absolute inset-0 bg-gradient-to-r from-amber-900/60 via-orange-900/50 to-amber-950/60"></div>
           <div className="relative z-10">
-            <h1 className="mb-2 text-white text-4xl font-bold drop-shadow-lg">Learning Outcomes Assessment System</h1>
+            <div className="mb-2">
+              <div className="text-white text-4xl font-bold tracking-wide drop-shadow-lg">PLOAS</div>
+              <h1 className="mt-1 text-white text-lg font-semibold drop-shadow-md">Program Learning Outcomes Assessment System</h1>
+            </div>
             <p className="text-amber-100 text-lg drop-shadow-md">College of Architecture and Planning</p>
             <div className="mt-3 flex items-center gap-2">
               <div className="bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm border border-white/30">
