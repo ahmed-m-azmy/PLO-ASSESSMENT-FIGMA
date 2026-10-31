@@ -1,10 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseKey =
-	import.meta.env.VITE_SUPABASE_KEY ??
-	import.meta.env.VITE_SUPABASE_ANON_KEY ??
-	import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim()
+const supabaseKey = [
+	import.meta.env.VITE_SUPABASE_KEY,
+	import.meta.env.VITE_SUPABASE_ANON_KEY,
+	import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+]
+	.map((key) => key?.trim())
+	.find((key) => key)
 
 if (!supabaseUrl || !supabaseKey) {
 	throw new Error(
@@ -14,9 +17,9 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
 	auth: {
-		// App uses department-password auth stored in custom tables/RPCs.
-		persistSession: false,
-		autoRefreshToken: false,
+		// Role-based access uses Supabase Auth sessions (RLS reads auth.uid()).
+		persistSession: true,
+		autoRefreshToken: true,
 		detectSessionInUrl: false,
 	},
 })

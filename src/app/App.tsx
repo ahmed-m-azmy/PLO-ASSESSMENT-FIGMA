@@ -1,5 +1,5 @@
 import * as React from "react";
-import { LearningOutcomesApp } from "./components/learning-outcomes-app";
+import { AuthGate } from "./components/auth-gate";
 import { IOSToggle } from "./components/ios-toggle";
 import { Toaster } from "./components/ui/sonner";
 
@@ -19,7 +19,7 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <LearningOutcomesApp />
+        <AuthGate />
       )}
 
       <div className="fixed bottom-6 right-6 z-50">

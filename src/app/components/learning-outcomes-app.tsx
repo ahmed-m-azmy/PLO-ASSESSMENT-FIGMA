@@ -16,6 +16,9 @@ import { Progress } from "./ui/progress";
 import { ExcelImport } from "./excel-import";
 import { ReportExport } from "./report-export";
 import { DepartmentLogin } from "./department-login";
+import { AdminUsers } from "./admin-users";
+import { AuditLogPanel } from "./audit-log-panel";
+import { CourseTools } from "./course-tools";
 import { toast } from "sonner";
 
 interface Department {
@@ -79,8 +82,22 @@ interface IndirectSurveyDetail {
   indirectTotal: number;
 }
 
-export function LearningOutcomesApp() {
+interface LearningOutcomesAppProps {
+  /** Set when the admin signed in with a role account; skips the legacy department-password login. */
+  authDepartmentId?: string;
+  authUserId?: string;
+  onSignOut?: () => void;
+  onChangePassword?: () => void;
+}
+
+export function LearningOutcomesApp({
+  authDepartmentId,
+  authUserId,
+  onSignOut,
+  onChangePassword,
+}: LearningOutcomesAppProps = {}) {
   const DEPARTMENT_SESSION_KEY = "department_auth_session";
+  const isRoleSession = Boolean(authDepartmentId);
 
   const [departments, setDepartments] = React.useState<Department[]>([
     { id: "2c326074-9095-4f66-8998-bb06d8fd66c4", name: "Department of Architecture" },
@@ -238,11 +255,11 @@ const visiblePLOs = React.useMemo(() =>
     },
   ]);
 
-  const [loggedInDepartment, setLoggedInDepartment] = React.useState<string | null>(null);
-  const [sessionBootstrapped, setSessionBootstrapped] = React.useState(false);
+  const [loggedInDepartment, setLoggedInDepartment] = React.useState<string | null>(authDepartmentId ?? null);
+  const [sessionBootstrapped, setSessionBootstrapped] = React.useState(isRoleSession);
   const [departmentAuthError, setDepartmentAuthError] = React.useState<string | null>(null);
   const [departmentAuthLoading, setDepartmentAuthLoading] = React.useState(false);
-  const [selectedDepartment, setSelectedDepartment] = React.useState("1");
+  const [selectedDepartment, setSelectedDepartment] = React.useState(authDepartmentId ?? "1");
   const [selectedYear, setSelectedYear] = React.useState("2024-2025");
   const [lockedYears, setLockedYears] = React.useState<string[]>([]);
 
@@ -255,6 +272,10 @@ const filteredPrograms = programs.filter(
 );
 
   React.useEffect(() => {
+    if (isRoleSession) {
+      window.localStorage.removeItem(DEPARTMENT_SESSION_KEY);
+      return;
+    }
     try {
       const sessionRaw = window.localStorage.getItem(DEPARTMENT_SESSION_KEY);
       if (sessionRaw) {
@@ -314,6 +335,10 @@ const filteredPrograms = programs.filter(
   };
 
   const handleLogout = () => {
+    if (onSignOut) {
+      onSignOut();
+      return;
+    }
     if (confirm("Are you sure you want to logout? You will need to select your department again.")) {
       setLoggedInDepartment(null);
       setDepartmentAuthError(null);
@@ -527,28 +552,67 @@ const filteredPrograms = programs.filter(
     }
   };
 
-  const toggleYearLock = () => {
-    if (lockedYears.includes(selectedYear)) {
-      setLockedYears(lockedYears.filter((year) => year !== selectedYear));
-      toast.success(`Academic Year ${selectedYear} has been unlocked`);
-    } else {
-      setLockedYears([...lockedYears, selectedYear]);
-      toast.success(`Academic Year ${selectedYear} has been locked`);
+  const sessionDepartmentId = authDepartmentId;
+
+  React.useEffect(() => {
+    if (!sessionDepartmentId) return;
+    supabase
+      .from("academic_sessions")
+      .select("name, is_locked")
+      .eq("department_id", sessionDepartmentId)
+      .order("name")
+      .then(({ data, error }) => {
+        if (error) {
+          toast.error(`Could not load academic years: ${error.message}`);
+          return;
+        }
+        if (!data || data.length === 0) return;
+        const names = data.map((s: any) => String(s.name));
+        setAcademicYears(names);
+        setLockedYears(data.filter((s: any) => s.is_locked).map((s: any) => String(s.name)));
+        setSelectedYear((current) => (names.includes(current) ? current : names[names.length - 1]));
+      });
+  }, [sessionDepartmentId]);
+
+  const toggleYearLock = async () => {
+    const locking = !lockedYears.includes(selectedYear);
+    if (sessionDepartmentId) {
+      const { error } = await supabase
+        .from("academic_sessions")
+        .upsert(
+          { department_id: sessionDepartmentId, name: selectedYear, is_locked: locking },
+          { onConflict: "department_id,name" }
+        );
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
     }
+    setLockedYears(locking ? [...lockedYears, selectedYear] : lockedYears.filter((year) => year !== selectedYear));
+    toast.success(`Academic Year ${selectedYear} has been ${locking ? "locked" : "unlocked"}`);
   };
 
   const isYearLocked = lockedYears.includes(selectedYear);
 
-  const addAcademicYear = (year: string) => {
+  const addAcademicYear = async (year: string) => {
     if (academicYears.includes(year)) {
       toast.error("This academic year already exists");
       return;
+    }
+    if (sessionDepartmentId) {
+      const { error } = await supabase
+        .from("academic_sessions")
+        .insert({ department_id: sessionDepartmentId, name: year, is_locked: false });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
     }
     setAcademicYears([...academicYears, year].sort());
     toast.success(`Academic Year ${year} added successfully`);
   };
 
-  const deleteAcademicYear = (year: string) => {
+  const deleteAcademicYear = async (year: string) => {
     if (lockedYears.includes(year)) {
       toast.error("Cannot delete a locked year. Unlock it first.");
       return;
@@ -563,6 +627,17 @@ const filteredPrograms = programs.filter(
         return;
       }
       setAssessments(assessments.filter((a) => a.academicYear !== year));
+    }
+    if (sessionDepartmentId) {
+      const { error } = await supabase
+        .from("academic_sessions")
+        .delete()
+        .eq("department_id", sessionDepartmentId)
+        .eq("name", year);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
     }
     setAcademicYears(academicYears.filter((y) => y !== year));
     toast.success(`Academic Year ${year} deleted successfully`);
@@ -657,13 +732,30 @@ const fetchCLOs = async () => {
       }
     }
 
+    // Course-level CLO achievement computed from uploaded section grades overrides the stored value.
+    const computedAchievement = new Map<string, number>();
+    if (isRoleSession && selectedYear) {
+      const { data: computed, error: computedError } = await supabase
+        .from("course_clo_results")
+        .select("clo_id, achievement")
+        .eq("academic_year", selectedYear)
+        .in("course_id", selectedProgramCourseIds);
+      if (!computedError && computed) {
+        computed.forEach((r: any) => {
+          if (r.achievement !== null && r.achievement !== undefined) {
+            computedAchievement.set(String(r.clo_id), Number(r.achievement));
+          }
+        });
+      }
+    }
+
     const mapped = data.map((c: any) => ({
       id: c.id,
       code: c.code,
       description: c.description,
       courseId: c.course_id,
       ploId: c.plo_id,
-      achievement: c.achievement,
+      achievement: computedAchievement.get(String(c.id)) ?? c.achievement,
       weight: c.weight,
       targetValue: cloTargetMap.get(String(c.id)) ?? c.target_value,
     }));
@@ -2154,6 +2246,15 @@ const plosMap = Object.fromEntries(
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
               </Button>
+              {onChangePassword && (
+                <Button
+                  onClick={onChangePassword}
+                  size="sm"
+                  className="bg-white/20 text-white hover:bg-white/30 border border-white/30"
+                >
+                  Password
+                </Button>
+              )}
             </div>
           </div>
           <div className="relative z-10 flex flex-col gap-4">
@@ -2232,7 +2333,7 @@ const plosMap = Object.fromEntries(
 
         <div className="px-6">
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className={`grid w-full ${isRoleSession ? "grid-cols-10" : "grid-cols-7"}`}>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="programs">Programs</TabsTrigger>
             <TabsTrigger value="courses">Courses</TabsTrigger>
@@ -2240,7 +2341,26 @@ const plosMap = Object.fromEntries(
             <TabsTrigger value="plo">PLOs</TabsTrigger>
             <TabsTrigger value="assessments">PLO Results</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            {isRoleSession && <TabsTrigger value="course-results">Course Results</TabsTrigger>}
+            {isRoleSession && <TabsTrigger value="users">Users</TabsTrigger>}
+            {isRoleSession && <TabsTrigger value="audit">Audit Log</TabsTrigger>}
           </TabsList>
+
+          {isRoleSession && (
+            <TabsContent value="course-results" className="space-y-4">
+              <CourseTools />
+            </TabsContent>
+          )}
+          {isRoleSession && (
+            <TabsContent value="users" className="space-y-4">
+              <AdminUsers currentUserId={authUserId ?? ""} academicYear={selectedYear} />
+            </TabsContent>
+          )}
+          {isRoleSession && (
+            <TabsContent value="audit" className="space-y-4">
+              <AuditLogPanel />
+            </TabsContent>
+          )}
 
           <TabsContent value="overview" className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
