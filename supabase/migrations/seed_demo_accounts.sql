@@ -12,8 +12,8 @@ DECLARE
   v_coord UUID := 'de000000-0000-4000-8000-0000000000c1';
   v_inst UUID := 'de000000-0000-4000-8000-0000000000d1';
   v_pw TEXT := 'Demo#Pass2026';
-  v_prog BIGINT;
-  v_course BIGINT;
+  v_prog TEXT;
+  v_course TEXT;
   v_plo UUID;
   v_clo1 UUID;
   v_clo2 UUID;
@@ -67,30 +67,30 @@ BEGIN
   SELECT v_dept, y, FALSE FROM unnest(ARRAY['2023-2024', '2024-2025', '2025-2026']) AS y
   ON CONFLICT (department_id, name) DO NOTHING;
 
-  SELECT id INTO v_prog FROM programs WHERE department_id = v_dept AND name = 'Demo Program' LIMIT 1;
+  SELECT id::text INTO v_prog FROM programs WHERE department_id = v_dept AND name = 'Demo Program' LIMIT 1;
   IF v_prog IS NULL THEN
-    INSERT INTO programs (name, department_id) VALUES ('Demo Program', v_dept) RETURNING id INTO v_prog;
-    INSERT INTO courses (program_id, code, name) VALUES (v_prog, 'DEMO101', 'Introduction to Design') RETURNING id INTO v_course;
-    INSERT INTO plos (program_id, code, description, target_value) VALUES (v_prog, 'PLO-1', 'Apply design principles', 75) RETURNING id INTO v_plo;
+    INSERT INTO programs (name, department_id) VALUES ('Demo Program', v_dept) RETURNING id::text INTO v_prog;
+    INSERT INTO courses (program_id, code, name) SELECT id, 'DEMO101', 'Introduction to Design' FROM programs WHERE id::text = v_prog RETURNING id::text INTO v_course;
+    INSERT INTO plos (program_id, code, description, target_value) SELECT id, 'PLO-1', 'Apply design principles', 75 FROM programs WHERE id::text = v_prog RETURNING id INTO v_plo;
     INSERT INTO clos (course_id, plo_id, code, description, achievement, weight, target_value)
-      VALUES (v_course, v_plo, 'CLO-1', 'Explain core design concepts', 0, 1, 75) RETURNING id INTO v_clo1;
+      SELECT id, v_plo, 'CLO-1', 'Explain core design concepts', 0, 1, 75 FROM courses WHERE id::text = v_course RETURNING id INTO v_clo1;
     INSERT INTO clos (course_id, plo_id, code, description, achievement, weight, target_value)
-      VALUES (v_course, v_plo, 'CLO-2', 'Produce a design solution', 0, 1, 75) RETURNING id INTO v_clo2;
+      SELECT id, v_plo, 'CLO-2', 'Produce a design solution', 0, 1, 75 FROM courses WHERE id::text = v_course RETURNING id INTO v_clo2;
 
-    INSERT INTO course_coordinators (course_id, profile_id) VALUES (v_course::text, v_coord);
+    INSERT INTO course_coordinators (course_id, profile_id) VALUES (v_course, v_coord);
 
     INSERT INTO clo_thresholds (course_id, clo_id, academic_year, threshold) VALUES
-      (v_course::text, v_clo1::text, '2024-2025', 60), (v_course::text, v_clo2::text, '2024-2025', 70);
+      (v_course, v_clo1::text, '2024-2025', 60), (v_course, v_clo2::text, '2024-2025', 70);
 
     INSERT INTO assignment_clo_mappings (course_id, academic_year, assignment_name, clo_id, max_score, sort_order)
-      VALUES (v_course::text, '2024-2025', 'Midterm', v_clo1::text, 20, 1) RETURNING id INTO v_m1;
+      VALUES (v_course, '2024-2025', 'Midterm', v_clo1::text, 20, 1) RETURNING id INTO v_m1;
     INSERT INTO assignment_clo_mappings (course_id, academic_year, assignment_name, clo_id, max_score, sort_order)
-      VALUES (v_course::text, '2024-2025', 'Project', v_clo2::text, 30, 2) RETURNING id INTO v_m2;
+      VALUES (v_course, '2024-2025', 'Project', v_clo2::text, 30, 2) RETURNING id INTO v_m2;
     INSERT INTO assignment_clo_mappings (course_id, academic_year, assignment_name, clo_id, max_score, sort_order)
-      VALUES (v_course::text, '2024-2025', 'Final', v_clo1::text, 50, 3) RETURNING id INTO v_m3;
+      VALUES (v_course, '2024-2025', 'Final', v_clo1::text, 50, 3) RETURNING id INTO v_m3;
 
     INSERT INTO course_sections (course_id, academic_year, section_code, instructor_id)
-      VALUES (v_course::text, '2024-2025', 'A1', v_inst) RETURNING id INTO v_sec;
+      VALUES (v_course, '2024-2025', 'A1', v_inst) RETURNING id INTO v_sec;
 
     FOR i IN 1..10 LOOP
       INSERT INTO section_grades (section_id, mapping_id, student_id, score) VALUES

@@ -18,7 +18,7 @@ All permissions are enforced by Postgres Row Level Security, not by the UI. Ever
 ## Workflow
 
 1. **Admin**: Users tab > add coordinators, or import the staff list (template download included; contact info included). Assign each course to its coordinator.
-2. **Coordinator**: defines CLOs (with the PLO each supports), the per-year threshold of each CLO, the Assignment-CLO mapping, and the sections/instructors.
+2. **Coordinator**: defines CLOs (with the PLO each supports), the per-year threshold of each CLO, the Assignment-CLO mapping, and the sections/instructors. Everything can be entered at once from the **Import from Excel** tab (one workbook with CLOs, Mapping and Sections sheets; the template downloads pre-filled with the course's current data). Imports update existing items by code and never delete; manual add/edit/delete stays available in the other tabs.
 3. **Instructor**: downloads the grade template (generated from the mapping), fills it, uploads. Upload is validated (section, columns, scores 0..max, duplicate IDs) and replaces the section's previous grades.
 4. **Results**: section achievement = % of students whose CLO score is >= the CLO threshold. Course achievement = all students of all sections pooled. These course values feed the existing PLO calculation (CLOs tab, PLO Results, Analytics and reports are unchanged).
 

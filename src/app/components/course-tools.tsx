@@ -7,6 +7,7 @@ import { Badge } from "./ui/badge";
 import { CloManager } from "./clo-manager";
 import { MappingManager } from "./mapping-manager";
 import { SectionsManager } from "./sections-manager";
+import { CourseSetupImport } from "./course-setup-import";
 import { OutcomeResults } from "./outcome-results";
 import { loadCourses, loadSessions, type CourseInfo, type SessionInfo } from "../lib/outcomes-data";
 
@@ -84,6 +85,7 @@ export function CourseTools() {
             <TabsTrigger value="clos">CLOs & thresholds</TabsTrigger>
             <TabsTrigger value="mapping">Assignment mapping</TabsTrigger>
             <TabsTrigger value="sections">Sections & instructors</TabsTrigger>
+            <TabsTrigger value="import">Import from Excel</TabsTrigger>
             <TabsTrigger value="results">Results</TabsTrigger>
           </TabsList>
           <TabsContent value="clos">
@@ -100,6 +102,9 @@ export function CourseTools() {
           </TabsContent>
           <TabsContent value="sections">
             <SectionsManager courseId={course.id} courseLabel={course.code} academicYear={year} locked={locked} />
+          </TabsContent>
+          <TabsContent value="import">
+            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bump} />
           </TabsContent>
           <TabsContent value="results">
             <OutcomeResults
