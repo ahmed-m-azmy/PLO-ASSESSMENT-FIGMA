@@ -90,7 +90,13 @@ function field(record: Record<string, unknown>, aliases: readonly string[]): str
 const isBlank = (record: Record<string, unknown>) => Object.values(record).every((v) => String(v ?? "").trim() === "");
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function buildSetupTemplate(course: CourseInfo, existing: SetupExisting | null): XLSX.WorkBook {
+export type SetupScope = "all" | "clos" | "mappings" | "sections";
+
+export function buildSetupTemplate(
+  course: CourseInfo,
+  existing: SetupExisting | null,
+  scope: SetupScope = "all",
+): XLSX.WorkBook {
   const cloById = new Map(existing?.clos.map((c) => [c.id, c.code]));
   const ploById = new Map(existing?.plos.map((p) => [p.id, p.code]));
   const hasData = existing && (existing.clos.length || existing.mappings.length || existing.sections.length);
@@ -140,27 +146,34 @@ export function buildSetupTemplate(course: CourseInfo, existing: SetupExisting |
   };
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheetOf(CLO_HEADERS, cloRows), SHEETS.clos);
-  XLSX.utils.book_append_sheet(workbook, sheetOf(MAPPING_HEADERS, mappingRows), SHEETS.mappings);
-  XLSX.utils.book_append_sheet(workbook, sheetOf(SECTION_HEADERS, sectionRows), SHEETS.sections);
+  if (scope === "all" || scope === "clos") XLSX.utils.book_append_sheet(workbook, sheetOf(CLO_HEADERS, cloRows), SHEETS.clos);
+  if (scope === "all" || scope === "mappings") {
+    XLSX.utils.book_append_sheet(workbook, sheetOf(MAPPING_HEADERS, mappingRows), SHEETS.mappings);
+  }
+  if (scope === "all" || scope === "sections") {
+    XLSX.utils.book_append_sheet(workbook, sheetOf(SECTION_HEADERS, sectionRows), SHEETS.sections);
+  }
   XLSX.utils.book_append_sheet(workbook, guide, "Guide");
   return workbook;
 }
 
-export function setupTemplateFileName(course: CourseInfo, year: string) {
-  return `${course.code}_${year}_course_setup.xlsx`.replace(/[^\w.-]+/g, "_");
+export function setupTemplateFileName(course: CourseInfo, year: string, scope: SetupScope = "all") {
+  const suffix = scope === "all" ? "course_setup" : scope;
+  return `${course.code}_${year}_${suffix}.xlsx`.replace(/[^\w.-]+/g, "_");
 }
 
 /** Reads and validates the workbook. Nothing is written to the database here. */
-export function parseSetupWorkbook(workbook: XLSX.WorkBook, context: SetupContext): SetupPlan {
+export function parseSetupWorkbook(workbook: XLSX.WorkBook, context: SetupContext, scope: SetupScope = "all"): SetupPlan {
   const issues: SetupIssue[] = [];
   const add = (sheet: string, row: number, message: string) => issues.push({ sheet, row, message });
 
-  const cloSheet = readSheet(workbook, SHEETS.clos);
-  const mappingSheet = readSheet(workbook, SHEETS.mappings);
-  const sectionSheet = readSheet(workbook, SHEETS.sections);
+  const wants = (s: SetupScope) => scope === "all" || scope === s;
+  const cloSheet = wants("clos") ? readSheet(workbook, SHEETS.clos) : null;
+  const mappingSheet = wants("mappings") ? readSheet(workbook, SHEETS.mappings) : null;
+  const sectionSheet = wants("sections") ? readSheet(workbook, SHEETS.sections) : null;
   if (!cloSheet && !mappingSheet && !sectionSheet) {
-    add("File", 0, "No sheet named CLOs, Mapping or Sections was found. Download the template and fill it.");
+    const expected = scope === "all" ? "CLOs, Mapping or Sections" : { clos: "CLOs", mappings: "Mapping", sections: "Sections" }[scope];
+    add("File", 0, `No sheet named ${expected} was found. Download the template and fill it.`);
     return { clos: null, mappings: null, sections: null, issues };
   }
 

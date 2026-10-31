@@ -19,6 +19,7 @@ export function CourseTools() {
   const [year, setYear] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [importKey, setImportKey] = React.useState(0);
 
   React.useEffect(() => {
     Promise.all([loadCourses(), loadSessions()])
@@ -36,6 +37,10 @@ export function CourseTools() {
   const session = sessions.find((s) => s.name === year);
   const locked = Boolean(session?.isLocked);
   const bump = () => setRefreshKey((k) => k + 1);
+  const bumpAll = () => {
+    bump();
+    setImportKey((k) => k + 1);
+  };
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>;
   if (courses.length === 0) {
@@ -89,10 +94,15 @@ export function CourseTools() {
             <TabsTrigger value="results">Results</TabsTrigger>
           </TabsList>
           <TabsContent value="clos">
-            <CloManager course={course} academicYear={year} locked={locked} onChanged={bump} />
+            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bumpAll} scope="clos" />
+            <div className="h-4" />
+            <CloManager key={`clo-${importKey}`} course={course} academicYear={year} locked={locked} onChanged={bump} />
           </TabsContent>
           <TabsContent value="mapping">
+            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bumpAll} scope="mappings" />
+            <div className="h-4" />
             <MappingManager
+              key={`map-${importKey}`}
               course={course}
               academicYear={year}
               years={sessions.map((s) => s.name)}
@@ -101,10 +111,12 @@ export function CourseTools() {
             />
           </TabsContent>
           <TabsContent value="sections">
-            <SectionsManager courseId={course.id} courseLabel={course.code} academicYear={year} locked={locked} />
+            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bumpAll} scope="sections" />
+            <div className="h-4" />
+            <SectionsManager key={`sec-${importKey}`} courseId={course.id} courseLabel={course.code} academicYear={year} locked={locked} />
           </TabsContent>
           <TabsContent value="import">
-            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bump} />
+            <CourseSetupImport course={course} academicYear={year} locked={locked} onApplied={bumpAll} />
           </TabsContent>
           <TabsContent value="results">
             <OutcomeResults

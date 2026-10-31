@@ -15,6 +15,7 @@ import {
   parseSetupWorkbook,
   setupTemplateFileName,
   type ApplyOutcome,
+  type SetupScope,
   type SetupExisting,
   type SetupPlan,
 } from "../lib/course-setup";
@@ -24,7 +25,15 @@ interface CourseSetupImportProps {
   academicYear: string;
   locked: boolean;
   onApplied: () => void;
+  scope?: SetupScope;
 }
+
+const SCOPE_TITLES: Record<SetupScope, string> = {
+  all: "Import course setup from Excel",
+  clos: "Import CLOs & thresholds from Excel",
+  mappings: "Import assignment mapping from Excel",
+  sections: "Import sections & instructors from Excel",
+};
 
 async function loadExisting(course: CourseInfo, academicYear: string): Promise<SetupExisting> {
   const [clos, thresholds, mappings, sections, ploRes] = await Promise.all([
@@ -39,7 +48,7 @@ async function loadExisting(course: CourseInfo, academicYear: string): Promise<S
   return { clos, thresholds, mappings, sections, plos };
 }
 
-export function CourseSetupImport({ course, academicYear, locked, onApplied }: CourseSetupImportProps) {
+export function CourseSetupImport({ course, academicYear, locked, onApplied, scope = "all" }: CourseSetupImportProps) {
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [busy, setBusy] = React.useState(false);
   const [fileName, setFileName] = React.useState("");
@@ -49,12 +58,12 @@ export function CourseSetupImport({ course, academicYear, locked, onApplied }: C
   React.useEffect(() => {
     setPlan(null);
     setFileName("");
-  }, [course.id, academicYear]);
+  }, [course.id, academicYear, scope]);
 
   const downloadTemplate = async () => {
     try {
       const existing = await loadExisting(course, academicYear);
-      XLSX.writeFile(buildSetupTemplate(course, existing), setupTemplateFileName(course, academicYear));
+      XLSX.writeFile(buildSetupTemplate(course, existing, scope), setupTemplateFileName(course, academicYear, scope));
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -68,7 +77,7 @@ export function CourseSetupImport({ course, academicYear, locked, onApplied }: C
     try {
       const existing = await loadExisting(course, academicYear);
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      setPlan(parseSetupWorkbook(workbook, { plos: existing.plos, existingClos: existing.clos }));
+      setPlan(parseSetupWorkbook(workbook, { plos: existing.plos, existingClos: existing.clos }, scope));
       setFileName(file.name);
     } catch (e) {
       setPlan(null);
@@ -110,7 +119,7 @@ export function CourseSetupImport({ course, academicYear, locked, onApplied }: C
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Import course setup from Excel</CardTitle>
+        <CardTitle>{SCOPE_TITLES[scope]}</CardTitle>
         <CardDescription>
           Add CLOs with thresholds, the assignment-to-CLO mapping, and sections with instructors in one file for{" "}
           {course.code} · {academicYear}. Existing items are updated and nothing is deleted; manual add, edit and
